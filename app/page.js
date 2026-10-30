@@ -56,15 +56,14 @@ function getCountryName(code, language) {
 export default function Home() {
   const [clicks, setClicks] = useState(0);
   const [browserId, setBrowserId] = useState(null);
-  const [message, setMessage] = useState("");
   const [ready, setReady] = useState(false);
   const [copied, setCopied] = useState(false);
   const [globalClicks, setGlobalClicks] = useState(null);
   const [globalError, setGlobalError] = useState(false);
-  const [sending, setSending] = useState(false);
   const [language, setLanguage] = useState("fr");
   const [introDone, setIntroDone] = useState(false);
 
+  const [popups, setPopups] = useState([]);
   const [leaderboardTab, setLeaderboardTab] = useState("visitors");
 
   const [leaderboards, setLeaderboards] = useState({
@@ -75,7 +74,6 @@ export default function Home() {
 
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
   const [leaderboardError, setLeaderboardError] = useState(false);
-
   const [viewer, setViewer] = useState(EMPTY_VIEWER);
 
   const t = translations[language] || translations.fr;
@@ -95,7 +93,6 @@ export default function Home() {
         error: "Les classements sont momentanément indisponibles.",
         refresh: "Actualisés automatiquement",
         rank: "Rang",
-        country: "Pays",
         yourRank: "TON CLASSEMENT",
         you: "Toi — visiteur anonyme",
         notRanked: "Pas encore classé aujourd'hui.",
@@ -113,13 +110,11 @@ export default function Home() {
         error: "Leaderboards are temporarily unavailable.",
         refresh: "Automatically refreshed",
         rank: "Rank",
-        country: "Country",
         yourRank: "YOUR RANK",
         you: "You — anonymous visitor",
         notRanked: "Not ranked today yet.",
       };
 
-  // Applique les données reçues de l'API.
   function applyLeaderboardData(data) {
     setLeaderboards({
       topVisitors: Array.isArray(data.topVisitors) ? data.topVisitors : [],
@@ -131,21 +126,76 @@ export default function Home() {
     setLeaderboardError(false);
   }
 
-  // Initialise la langue et les données du navigateur.
+  // Crée un message flottant à un emplacement aléatoire.
+  function addPopup(text) {
+    if (!text || typeof window === "undefined") return;
+
+    const id = window.crypto.randomUUID();
+
+    setPopups((current) => {
+      const popupWidth = Math.min(250, window.innerWidth - 32);
+      const popupHeight = 90;
+      const margin = 16;
+
+      const maxX = Math.max(margin, window.innerWidth - popupWidth - margin);
+      const maxY = Math.max(margin, window.innerHeight - popupHeight - margin);
+
+      let x = margin;
+      let y = margin;
+      let foundPosition = false;
+
+      // On essaie plusieurs emplacements pour éviter les chevauchements.
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const candidateX = margin + Math.random() * (maxX - margin);
+        const candidateY = margin + Math.random() * (maxY - margin);
+
+        const centerX = window.innerWidth / 2;
+        const centerY = window.innerHeight / 2;
+
+        // Zone centrale réservée au bouton.
+        const nearButton =
+          Math.abs(candidateX + popupWidth / 2 - centerX) < 155 &&
+          Math.abs(candidateY + popupHeight / 2 - centerY) < 155;
+
+        const overlaps = current.some((popup) => {
+          const distance = Math.hypot(
+            popup.x - candidateX,
+            popup.y - candidateY,
+          );
+
+          return distance < 125;
+        });
+
+        if (!nearButton && !overlaps) {
+          x = candidateX;
+          y = candidateY;
+          foundPosition = true;
+          break;
+        }
+      }
+
+      // Si l'écran est chargé, on privilégie quand même l'affichage du message.
+      if (!foundPosition) {
+        x = margin + Math.random() * (maxX - margin);
+        y = margin + Math.random() * (maxY - margin);
+      }
+
+      return [...current, { id, text, x, y }];
+    });
+  }
+
+  function removePopup(id) {
+    setPopups((current) => current.filter((popup) => popup.id !== id));
+  }
+
   useEffect(() => {
     const detectedLanguage = detectLanguage();
 
-    const currentTranslations =
-      translations[detectedLanguage] || translations.en || translations.fr;
-
     setLanguage(detectedLanguage);
-    setMessage(currentTranslations.initialMessage || "");
 
     try {
       const saved = Number(window.localStorage.getItem("useless-clicks") || 0);
-
       setClicks(Number.isSafeInteger(saved) && saved >= 0 ? saved : 0);
-
       setBrowserId(getBrowserId());
     } catch (error) {
       console.error("Initialisation du navigateur impossible:", error);
@@ -155,7 +205,6 @@ export default function Home() {
     }
   }, []);
 
-  // Gère l'intro et respecte les préférences d'accessibilité.
   useEffect(() => {
     const reduceMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
@@ -166,42 +215,31 @@ export default function Home() {
       return;
     }
 
-    const timeout = window.setTimeout(() => {
-      setIntroDone(true);
-    }, 2800);
-
+    const timeout = window.setTimeout(() => setIntroDone(true), 2800);
     return () => window.clearTimeout(timeout);
   }, []);
 
-  // Charge le compteur global et le rafraîchit toutes les 10 secondes.
+  // Compteur global.
   useEffect(() => {
     let active = true;
 
     async function loadGlobalClicks() {
       try {
-        const response = await fetch("/api/clicks", {
-          cache: "no-store",
-        });
-
+        const response = await fetch("/api/clicks", { cache: "no-store" });
         const data = await response.json();
 
-        if (!response.ok) {
-          throw new Error(data.error || "Lecture impossible");
-        }
+        if (!response.ok) throw new Error(data.error || "Lecture impossible");
 
         if (active) {
           setGlobalClicks(data.total);
           setGlobalError(false);
         }
       } catch {
-        if (active) {
-          setGlobalError(true);
-        }
+        if (active) setGlobalError(true);
       }
     }
 
     loadGlobalClicks();
-
     const interval = window.setInterval(loadGlobalClicks, 10000);
 
     return () => {
@@ -210,7 +248,7 @@ export default function Home() {
     };
   }, []);
 
-  // Charge les classements et la position du visiteur.
+  // Classements.
   useEffect(() => {
     if (!browserId) return;
 
@@ -225,28 +263,18 @@ export default function Home() {
 
         const data = await response.json();
 
-        if (!response.ok) {
-          throw new Error(data.error || "Lecture impossible");
-        }
+        if (!response.ok) throw new Error(data.error || "Lecture impossible");
 
-        if (active) {
-          applyLeaderboardData(data);
-        }
+        if (active) applyLeaderboardData(data);
       } catch (error) {
         console.error("Chargement des classements impossible:", error);
-
-        if (active) {
-          setLeaderboardError(true);
-        }
+        if (active) setLeaderboardError(true);
       } finally {
-        if (active) {
-          setLeaderboardLoading(false);
-        }
+        if (active) setLeaderboardLoading(false);
       }
     }
 
     loadLeaderboards();
-
     const interval = window.setInterval(loadLeaderboards, 15000);
 
     return () => {
@@ -255,75 +283,69 @@ export default function Home() {
     };
   }, [browserId]);
 
-  // Enregistre un clic.
+  // Clic : message et compteur immédiats, requêtes serveur en arrière-plan.
   async function handleClick() {
-    if (!browserId || sending) return;
-
-    setSending(true);
+    if (!browserId) return;
 
     const messages = t.messages || translations.fr.messages || [];
 
     if (messages.length > 0) {
-      setMessage(messages[Math.floor(Math.random() * messages.length)]);
+      const randomMessage =
+        messages[Math.floor(Math.random() * messages.length)];
+      addPopup(randomMessage);
     }
 
+    // Incrément fiable même si plusieurs clics arrivent très rapidement.
+    let nextClicks = 0;
+
+    setClicks((current) => {
+      nextClicks = current + 1;
+
+      try {
+        window.localStorage.setItem("useless-clicks", String(nextClicks));
+      } catch {}
+
+      return nextClicks;
+    });
+
+    // L'enregistrement ne bloque pas le bouton.
     try {
       const response = await fetch("/api/clicks", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({ browserId }),
       });
 
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || "Clic refusé");
-      }
+      if (!response.ok) throw new Error(data.error || "Clic refusé");
 
       setGlobalClicks(data.total);
       setGlobalError(false);
 
-      const nextClicks = clicks + 1;
-      setClicks(nextClicks);
+      // Actualisation des classements en arrière-plan.
+      fetch(`/api/leaderboards?browserId=${encodeURIComponent(browserId)}`, {
+        cache: "no-store",
+      })
+        .then(async (rankingResponse) => {
+          const rankingData = await rankingResponse.json();
 
-      try {
-        window.localStorage.setItem("useless-clicks", String(nextClicks));
-      } catch {}
+          if (!rankingResponse.ok) {
+            throw new Error(rankingData.error || "Actualisation impossible");
+          }
 
-      // Recharge les classements et le rang personnel.
-      try {
-        const rankingResponse = await fetch(
-          `/api/leaderboards?browserId=${encodeURIComponent(browserId)}`,
-          { cache: "no-store" },
-        );
-
-        const rankingData = await rankingResponse.json();
-
-        if (!rankingResponse.ok) {
-          throw new Error(rankingData.error || "Actualisation impossible");
-        }
-
-        applyLeaderboardData(rankingData);
-      } catch (error) {
-        console.error("Actualisation des classements impossible:", error);
-      }
+          applyLeaderboardData(rankingData);
+        })
+        .catch((error) => {
+          console.error("Actualisation des classements impossible:", error);
+        });
     } catch (error) {
       console.error("Enregistrement du clic impossible:", error);
-
       setGlobalError(true);
-
-      setMessage(
-        t.clickError || "Le néant ne répond pas. Réessaie dans un instant.",
-      );
-    } finally {
-      setSending(false);
     }
   }
 
-  // Partage le score du visiteur.
   async function handleShare() {
     const text =
       typeof t.shareText === "function"
@@ -339,21 +361,16 @@ export default function Home() {
         });
       } else {
         await navigator.clipboard.writeText(`${text} ${window.location.href}`);
-
         setCopied(true);
-
         window.setTimeout(() => setCopied(false), 2000);
       }
     } catch (error) {
       if (error.name !== "AbortError") {
-        setMessage(
-          t.shareFailed || "Le partage a échoué. Même lui est inutile.",
-        );
+        addPopup(t.shareFailed || "Le partage a échoué. Même lui est inutile.");
       }
     }
   }
 
-  // Détermine les données de l'onglet actuellement sélectionné.
   const currentRows =
     leaderboardTab === "visitors"
       ? leaderboards.topVisitors
@@ -361,7 +378,6 @@ export default function Home() {
         ? leaderboards.daily
         : leaderboards.countries;
 
-  // Position personnelle selon le classement affiché.
   const viewerEntry =
     leaderboardTab === "visitors"
       ? viewer.topVisitors
@@ -371,12 +387,9 @@ export default function Home() {
 
   const viewerRank = viewerEntry?.rank ? Number(viewerEntry.rank) : null;
 
-  // Affiche une ligne séparée uniquement si le visiteur
-  // se trouve au-delà de la dixième position.
   const showViewerSeparately =
     leaderboardTab !== "countries" && viewerRank !== null && viewerRank > 10;
 
-  // Détermine si la ligne du top 10 correspond au visiteur.
   function isCurrentViewer(entry, rank) {
     if (leaderboardTab === "visitors") {
       return Number(viewer.topVisitors?.rank) === rank;
@@ -406,21 +419,18 @@ export default function Home() {
             {t.logo}
             <span>.</span>
           </a>
-
           <span className={styles.version}>{t.version}</span>
         </header>
 
         <section className={styles.hero}>
           <div className={styles.intro}>
             <p className={styles.eyebrow}>{t.eyebrow}</p>
-
             <h1>
               {t.titleLine1}
               <br />
               {t.titleLine2}
               <span>.</span>
             </h1>
-
             <p className={styles.subtitle}>{t.subtitle}</p>
           </div>
 
@@ -430,16 +440,14 @@ export default function Home() {
             <button
               className={styles.button}
               onClick={handleClick}
-              disabled={!ready || !browserId || sending}
+              disabled={!ready || !browserId}
               aria-label={t.buttonAriaLabel || t.click}
             >
-              <span>{sending ? "..." : t.click}</span>
+              <span>{t.click}</span>
               <small>{t.forNothing}</small>
             </button>
 
-            <span className={styles.buttonFootnote}>
-              {sending ? t.sending : t.buttonFootnote}
-            </span>
+            <span className={styles.buttonFootnote}>{t.buttonFootnote}</span>
           </div>
 
           <section className={styles.stats} aria-label="Statistiques des clics">
@@ -448,15 +456,12 @@ export default function Home() {
                 <span className={styles.statDot} />
                 <span className={styles.statLabel}>{t.world}</span>
               </div>
-
               <p className={styles.statNumber}>
                 {globalClicks === null
                   ? "—"
                   : globalClicks.toLocaleString(language)}
               </p>
-
               <p className={styles.statCaption}>{t.worldCaption}</p>
-
               <span className={styles.statTag}>{t.everyone}</span>
             </article>
 
@@ -465,18 +470,13 @@ export default function Home() {
                 <span className={styles.personalIcon}>↗</span>
                 <span className={styles.statLabel}>{t.personal}</span>
               </div>
-
               <p className={styles.statNumber}>
                 {clicks.toLocaleString(language)}
               </p>
-
               <p className={styles.statCaption}>{t.personalCaption}</p>
-
               <span className={styles.statTag}>{t.thisBrowser}</span>
             </article>
           </section>
-
-          {/* CLASSEMENTS */}
 
           <section
             className={styles.leaderboards}
@@ -484,9 +484,7 @@ export default function Home() {
           >
             <div className={styles.leaderboardHeading}>
               <p className={styles.eyebrow}>{leaderboardText.rank}</p>
-
               <h2 id="leaderboard-title">{leaderboardText.title}</h2>
-
               <p>{leaderboardText.subtitle}</p>
             </div>
 
@@ -544,15 +542,11 @@ export default function Home() {
                 <ol className={styles.leaderboardList}>
                   {currentRows.map((entry, index) => {
                     const isCountry = leaderboardTab === "countries";
-
                     const rank = Number(entry.rank) || index + 1;
-
                     const label = isCountry
                       ? getCountryName(entry.countryCode, language)
                       : `${leaderboardText.visitor} #${rank}`;
-
                     const count = Number(entry.clicks) || 0;
-
                     const isViewer = isCurrentViewer(entry, rank);
 
                     return (
@@ -576,9 +570,7 @@ export default function Home() {
                               {entry.countryCode}
                             </span>
                           )}
-
                           {label}
-
                           {isViewer && (
                             <small className={styles.youLabel}>
                               {isFrench ? "C'est toi" : "You"}
@@ -596,8 +588,6 @@ export default function Home() {
                 </ol>
               )}
 
-              {/* LIGNE PERSONNELLE SOUS LE TOP 10 */}
-
               {!leaderboardLoading &&
                 !leaderboardError &&
                 showViewerSeparately && (
@@ -605,30 +595,24 @@ export default function Home() {
                     <p className={styles.viewerSectionLabel}>
                       {leaderboardText.yourRank}
                     </p>
-
                     <div
                       className={`${styles.leaderboardRow} ${styles.currentViewerRow}`}
                     >
                       <span className={styles.leaderboardRank}>
                         {viewerRank.toLocaleString(language)}
                       </span>
-
                       <span className={styles.leaderboardName}>
                         {leaderboardText.you}
                       </span>
-
                       <span className={styles.leaderboardScore}>
                         {Number(viewerEntry.clicks || 0).toLocaleString(
                           language,
                         )}
-
                         <small>{leaderboardText.clicks}</small>
                       </span>
                     </div>
                   </div>
                 )}
-
-              {/* Pays du visiteur si son pays est dans le top 10. */}
 
               {leaderboardTab === "daily" &&
                 !viewer.daily &&
@@ -644,18 +628,6 @@ export default function Home() {
               </p>
             </div>
           </section>
-
-          <div className={styles.messageArea}>
-            <span className={styles.messageLabel}>{t.messageLabel}</span>
-
-            <p
-              className={styles.message}
-              key={`${clicks}-${message}`}
-              aria-live="polite"
-            >
-              {message}
-            </p>
-          </div>
 
           {globalError && (
             <p className={styles.error} role="status">
@@ -679,22 +651,35 @@ export default function Home() {
         </footer>
       </main>
 
+      {/* Couche indépendante des pop-ups : elle ne bloque jamais les clics. */}
+      <div className={styles.popupContainer} aria-live="polite">
+        {popups.map((popup) => (
+          <div
+            key={popup.id}
+            className={styles.floatingPopup}
+            style={{
+              left: `${popup.x}px`,
+              top: `${popup.y}px`,
+            }}
+            onAnimationEnd={() => removePopup(popup.id)}
+          >
+            {popup.text}
+          </div>
+        ))}
+      </div>
+
       {!introDone && (
         <div className={styles.introScreen} aria-hidden="true">
           <div className={styles.introGlow} />
-
           <p className={styles.introKicker}>{t.buttonHint}</p>
-
           <div className={styles.introTitle}>
             {t.logo}
             <span>.</span>
           </div>
-
           <div className={styles.introButton}>
             <span>{t.click}</span>
             <small>{t.forNothing}</small>
           </div>
-
           <p className={styles.introFooter}>{t.forNothing}</p>
         </div>
       )}

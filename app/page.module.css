@@ -1000,9 +1000,10 @@
 
 .leaderboardScore {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 3px;
+  justify-content: flex-end;
+  gap: 4px;
   color: var(--accent-dark);
   font-size: 15px;
   font-weight: 900;
@@ -1069,6 +1070,71 @@
   letter-spacing: 1.5px;
 }
 
+/* =========================================
+   POP-UPS FLOTTANTS
+   ========================================= */
+
+.popupContainer {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.floatingPopup {
+  position: absolute;
+  width: max-content;
+  max-width: min(250px, calc(100vw - 32px));
+  padding: 13px 17px;
+
+  border: 1px solid rgba(198, 61, 36, 0.35);
+  border-radius: 13px;
+
+  background: #fffdfa;
+  color: #24221f;
+
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+
+  box-shadow:
+    0 8px 25px rgba(36, 34, 31, 0.12),
+    0 3px 0 rgba(198, 61, 36, 0.15);
+
+  animation: floatingPopupLife 5s ease both;
+  will-change: transform, opacity;
+}
+
+@keyframes floatingPopupLife {
+  0% {
+    opacity: 0;
+    transform: scale(0.65) rotate(-5deg);
+  }
+
+  8% {
+    opacity: 1;
+    transform: scale(1.05) rotate(2deg);
+  }
+
+  13% {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+
+  78% {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(0.8) translateY(-15px) rotate(3deg);
+  }
+}
+
 @media (min-width: 600px) {
   .leaderboards {
     max-width: 580px;
@@ -1090,6 +1156,11 @@
 
   .leaderboardName {
     font-size: 14px;
+  }
+  .floatingPopup {
+    max-width: min(190px, calc(100vw - 32px));
+    padding: 10px 13px;
+    font-size: 11px;
   }
 }
 

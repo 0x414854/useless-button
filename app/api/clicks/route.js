@@ -17,11 +17,11 @@ const supabase =
       })
     : null;
 
-// Protection temporaire par instance.
-// À remplacer par une limitation distribuée en production.
+// Protection temporaire par navigateur.
+// Chaque browserId possède son propre cooldown.
 const recentClicks = new Map();
-const COOLDOWN_MS = 500;
-const MAX_TRACKED_IPS = 10_000;
+const COOLDOWN_MS = 100;
+const MAX_TRACKED_BROWSERS = 10_000;
 
 function jsonError(message, status) {
   return NextResponse.json(
@@ -36,14 +36,6 @@ function jsonError(message, status) {
 function isSameOrigin(request) {
   const origin = request.headers.get("origin");
   return origin !== null && origin === request.nextUrl.origin;
-}
-
-function getClientKey(request) {
-  // Vercel fournit normalement x-forwarded-for.
-  // Cette valeur sert uniquement à une limitation temporaire.
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
-  );
 }
 
 function isValidUuid(value) {
@@ -98,22 +90,23 @@ export async function POST(request) {
     return jsonError("Identifiant de navigateur invalide.", 400);
   }
 
-  const key = getClientKey(request);
   const now = Date.now();
-  const lastClick = recentClicks.get(key) ?? 0;
+  const lastClick = recentClicks.get(browserId) ?? 0;
 
   if (now - lastClick < COOLDOWN_MS) {
     return jsonError("Un peu de patience entre deux clics.", 429);
   }
 
   // Éviter que la Map grandisse indéfiniment.
-  if (!recentClicks.has(key) && recentClicks.size >= MAX_TRACKED_IPS) {
+  if (
+    !recentClicks.has(browserId) &&
+    recentClicks.size >= MAX_TRACKED_BROWSERS
+  ) {
     return jsonError("Trop de requêtes. Réessaie plus tard.", 503);
   }
 
-  recentClicks.set(key, now);
+  recentClicks.set(browserId, now);
 
-  // Header fourni par l'infrastructure Vercel en production.
   const headerCountry = request.headers.get("x-vercel-ip-country");
   const countryCode =
     headerCountry && /^[A-Za-z]{2}$/.test(headerCountry)
@@ -126,12 +119,11 @@ export async function POST(request) {
   });
 
   if (error) {
-    recentClicks.delete(key);
+    recentClicks.delete(browserId);
     console.error("Erreur incrémentation:", error.message);
     return jsonError("Le clic n'a pas pu être enregistré.", 500);
   }
 
-  // record_click renvoie un objet JSON, pas un nombre.
   return NextResponse.json(
     {
       total: Number(data.global_total),
